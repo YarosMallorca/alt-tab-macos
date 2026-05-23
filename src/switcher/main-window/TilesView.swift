@@ -85,7 +85,6 @@ class TilesView {
     }
 
     static func lockSearchMode() {
-        if !ProFeature.lockSearchInSwitcher.attemptUse() { return }
         if searchMode == .editing {
             searchMode = .locked
             updateSearchFieldEditability()
@@ -96,7 +95,6 @@ class TilesView {
     }
 
     static func enableSearchEditing() {
-        if !ProFeature.searchInSwitcher.attemptUse() { return }
         guard searchMode != .editing else {
             placeSearchCaretAtEnd()
             return
@@ -162,7 +160,6 @@ class TilesView {
 
     private static func updateSearchQuery(_ query: String) {
         if (SwitcherSession.current?.searchQuery ?? "") == query { return }
-        if !query.isEmpty { UsageStats.recordSearchIfFirst() }
         clearHover()
         Windows.updateSearchQuery(query)
         stopKeyRepeatTimers()

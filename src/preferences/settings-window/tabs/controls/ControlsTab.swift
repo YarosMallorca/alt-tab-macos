@@ -84,10 +84,6 @@ class ControlsTab {
     private static var overrideControls = [String: NSView]()
     /// Unlink buttons keyed by the indexed UserDefaults key. Visible iff `hasOverride` is true.
     private static var unlinkButtons = [String: NSButton]()
-    /// Pro-badge views for the Pro-gated override segments. Keyed by the indexed UserDefaults key.
-    /// Stored so `extraAction` callbacks and the Pro-lock observer can call
-    /// `AppearanceTab.refreshTrailingSegmentBadge(...)` per shortcut.
-    private static var overrideProBadges = [String: ProBadgeView.SegmentOverlay]()
 
     static func initializePreferencesDependentState() {
         applyActiveShortcutPreferences()
@@ -137,7 +133,6 @@ class ControlsTab {
         refreshShortcutControlsDisplay()
     }
 
-    private static var proLockObserver: NSObjectProtocol?
 
     static func initTab() -> NSView {
         shortcutEditorViews = (0..<Preferences.maxShortcutCount).map { shortcutTab($0) }
@@ -153,27 +148,10 @@ class ControlsTab {
         additionalControlsSheet = AdditionalControlsSheet()
         refreshShortcutUi()
         (0..<Preferences.shortcutCount).forEach { initializeShortcutRecorderState($0) }
-        if proLockObserver == nil {
-            proLockObserver = NotificationCenter.default.addObserver(
-                forName: ProTransitionManager.proLockStateDidChangeNotification,
-                object: nil, queue: .main
-            ) { _ in
-                refreshShortcutUi()
-                // The 3 Pro-gated index-0 overrides may have been snapshot+downgraded by
-                // `ProTransitionState.onProLockEngaged`; the bound segmented/radio controls hold
-                // the now-stale pre-downgrade value. Resync them to the current stored value so
-                // the UI reflects the locked state without requiring a Settings reopen.
-                refreshGatedOverrideControlsFromStored()
-            }
-        }
         return view
     }
 
     static func cleanup() {
-        if let observer = proLockObserver {
-            NotificationCenter.default.removeObserver(observer)
-            proLockObserver = nil
-        }
         if let observer = shortcutRowsScrollObserver {
             NotificationCenter.default.removeObserver(observer)
             shortcutRowsScrollObserver = nil
@@ -191,7 +169,6 @@ class ControlsTab {
         tabContentsByIndex.removeAll()
         overrideControls.removeAll()
         unlinkButtons.removeAll()
-        overrideProBadges.removeAll()
         tabSegmentSubtrees.removeAll()
         shortcutRowsStackView = nil
         gestureSidebarRow = nil
@@ -428,8 +405,6 @@ class ControlsTab {
 
     private static func makeAppearanceTable(_ index: Int, _ width: CGFloat) -> NSView {
         let table = TableGroupView(width: width)
-        let sizeProIndex = AppearanceSizePreference.allCases.firstIndex(of: .auto)!
-        let shortcutStyleProIndex = ShortcutStylePreference.allCases.firstIndex(of: .searchOnRelease)!
         let extraAction: () -> Void = {
             refreshUnlinkButtons()
             AppearanceTab.refreshAllOverrideInfoLabels()
@@ -438,9 +413,7 @@ class ControlsTab {
         let styleKey = Preferences.indexToName("appearanceStyleOverride", index)
         let styleRadios = LabelAndControl.makeImageRadioButtons(
             styleKey, AppearanceStylePreference.allCases,
-            extraAction: nil, buttonSpacing: 10,
-            proGatedIndices: AppearanceTab.proGatedAppearanceStyleIndices())
-        AppearanceTab.addProBadgesToStyleButtons(styleRadios)
+            extraAction: nil, buttonSpacing: 10)
         overrideControls[styleKey] = styleRadios
         if !Preferences.hasOverride("appearanceStyleOverride", index) {
             syncRadioButtons(styleRadios, to: Preferences.appearanceStyle.index)
@@ -450,7 +423,7 @@ class ControlsTab {
             index: index,
             valueAtIndex: { AppearanceStylePreference.allCases[$0].indexAsString },
             globalIndex: { Preferences.appearanceStyle.index },
-            proGatedIndices: AppearanceTab.proGatedAppearanceStyleIndices(),
+            proGatedIndices: [],
             onChange: extraAction)
         let styleUnlink = makeUnlinkButton("appearanceStyleOverride", index)
         let styleRow = NSStackView(views: [styleRadios, styleUnlink])
@@ -458,34 +431,18 @@ class ControlsTab {
         styleRow.alignment = .centerY
         styleRow.spacing = TableGroupView.padding
         table.addRow(secondaryViews: [styleRow], secondaryViewsAlignment: .centerX)
-        // Size (segmented control; `.auto` is Pro-gated)
         let sizeKey = Preferences.indexToName("appearanceSizeOverride", index)
         let sizeControl = LabelAndControl.makeSegmentedControl(sizeKey, AppearanceSizePreference.allCases, segmentWidth: 100, extraAction: nil)
-        let sizeOverlay = AppearanceTab.addProBadgeToAutoSegment(sizeControl)
-        overrideProBadges[sizeKey] = sizeOverlay
         overrideControls[sizeKey] = sizeControl
         if !Preferences.hasOverride("appearanceSizeOverride", index) {
             sizeControl.selectedSegment = Preferences.appearanceSize.index
-            AppearanceTab.refreshTrailingSegmentBadge(sizeControl, proIndex: sizeProIndex, overlay: sizeOverlay)
         }
         installOverrideSegmentedAction(sizeControl,
             baseName: "appearanceSizeOverride",
             index: index,
             valueAtIndex: { AppearanceSizePreference.allCases[$0].indexAsString },
             globalIndex: { Preferences.appearanceSize.index },
-            onChange: { [weak sizeControl] in
-                extraAction()
-                if let sc = sizeControl, let overlay = overrideProBadges[sizeKey] {
-                    AppearanceTab.refreshTrailingSegmentBadge(sc, proIndex: sizeProIndex, overlay: overlay)
-                }
-            })
-        wrapAppearanceSegmentProLockIntercept(sizeControl, key: sizeKey,
-            proIndex: sizeProIndex,
-            currentStoredIndex: { CachedUserDefaults.intFromMacroPref(sizeKey, AppearanceSizePreference.allCases) })
-        sizeOverlay.badge.onWindowKeyChanged = { [weak sizeControl] in
-            guard let sizeControl else { return }
-            AppearanceTab.refreshTrailingSegmentBadge(sizeControl, proIndex: sizeProIndex, overlay: sizeOverlay)
-        }
+            onChange: { extraAction() })
         let sizeUnlink = makeUnlinkButton("appearanceSizeOverride", index)
         table.addRow(leftText: NSLocalizedString("Size", comment: ""), rightViews: [sizeControl, sizeUnlink])
         // Theme (segmented control; not Pro-gated)
@@ -503,34 +460,18 @@ class ControlsTab {
             onChange: extraAction)
         let themeUnlink = makeUnlinkButton("appearanceThemeOverride", index)
         table.addRow(leftText: NSLocalizedString("Theme", comment: ""), rightViews: [themeControl, themeUnlink])
-        // After keys are released (segmented control; `.searchOnRelease` is Pro-gated)
         let shortcutStyleKey = Preferences.indexToName("shortcutStyleOverride", index)
         let shortcutStyleControl = LabelAndControl.makeSegmentedControl(shortcutStyleKey, ShortcutStylePreference.allCases, segmentWidth: 100, extraAction: nil)
-        let shortcutStyleOverlay = AppearanceTab.addProBadgeToShortcutStyleSegment(shortcutStyleControl, proIndex: shortcutStyleProIndex)
-        overrideProBadges[shortcutStyleKey] = shortcutStyleOverlay
         overrideControls[shortcutStyleKey] = shortcutStyleControl
         if !Preferences.hasOverride("shortcutStyleOverride", index) {
             shortcutStyleControl.selectedSegment = Preferences.shortcutStyle.index
-            AppearanceTab.refreshTrailingSegmentBadge(shortcutStyleControl, proIndex: shortcutStyleProIndex, overlay: shortcutStyleOverlay)
         }
         installOverrideSegmentedAction(shortcutStyleControl,
             baseName: "shortcutStyleOverride",
             index: index,
             valueAtIndex: { ShortcutStylePreference.allCases[$0].indexAsString },
             globalIndex: { Preferences.shortcutStyle.index },
-            onChange: { [weak shortcutStyleControl] in
-                extraAction()
-                if let sc = shortcutStyleControl, let overlay = overrideProBadges[shortcutStyleKey] {
-                    AppearanceTab.refreshTrailingSegmentBadge(sc, proIndex: shortcutStyleProIndex, overlay: overlay)
-                }
-            })
-        wrapAppearanceSegmentProLockIntercept(shortcutStyleControl, key: shortcutStyleKey,
-            proIndex: shortcutStyleProIndex,
-            currentStoredIndex: { CachedUserDefaults.intFromMacroPref(shortcutStyleKey, ShortcutStylePreference.allCases) })
-        shortcutStyleOverlay.badge.onWindowKeyChanged = { [weak shortcutStyleControl] in
-            guard let shortcutStyleControl else { return }
-            AppearanceTab.refreshTrailingSegmentBadge(shortcutStyleControl, proIndex: shortcutStyleProIndex, overlay: shortcutStyleOverlay)
-        }
+            onChange: { extraAction() })
         let shortcutStyleUnlink = makeUnlinkButton("shortcutStyleOverride", index)
         table.addRow(leftText: NSLocalizedString("After keys are released", comment: ""), rightViews: [shortcutStyleControl, shortcutStyleUnlink])
         // Preview selected window
@@ -544,29 +485,6 @@ class ControlsTab {
         let previewUnlink = makeUnlinkButton("previewFocusedWindowOverride", index)
         table.addRow(leftText: NSLocalizedString("Preview selected window", comment: ""), rightViews: [previewControl, previewUnlink])
         return table
-    }
-
-    /// Wrap a segmented control's `onAction` so clicking the Pro-gated segment while locked
-    /// redirects to the Upgrade tab instead of writing the preference. Mirrors
-    /// `AppearanceTab.wrapAppearanceSizeProLockIntercept` / `wrapShortcutStyleProLockIntercept`.
-    private static func wrapAppearanceSegmentProLockIntercept(_ segmentedControl: NSSegmentedControl, key: String, proIndex: Int, currentStoredIndex: @escaping () -> Int) {
-        let original = segmentedControl.onAction
-        segmentedControl.onAction = { control in
-            let segmented = control as! NSSegmentedControl
-            if segmented.selectedSegment == proIndex && LicenseManager.shared.isProLocked {
-                segmented.selectedSegment = currentStoredIndex()
-                // `original` (which wraps `extraAction`) is what refreshes the overlay — we bail
-                // before it fires, so resync the overlay manually now that we've reset the
-                // selection. Otherwise the badge keeps its pre-click "selected" state and the
-                // label/icon keep the selected text color.
-                if let overlay = overrideProBadges[key] {
-                    AppearanceTab.refreshTrailingSegmentBadge(segmented, proIndex: proIndex, overlay: overlay)
-                }
-                UpgradeTab.navigateToUpgradeTab()
-                return
-            }
-            original?(control)
-        }
     }
 
     @objc private static func switchControlTabSection(_ sender: NSSegmentedControl) {
@@ -667,12 +585,7 @@ class ControlsTab {
             buttonView.onClick = { [weak stack] _ in
                 guard let stack else { return }
                 let buttons = stack.arrangedSubviews.compactMap { $0 as? ImageTextButtonView }
-                if LicenseManager.shared.isProLocked && proGatedIndices.contains(i) {
-                    let storedIndex = Int(UserDefaults.standard.string(forKey: key) ?? "") ?? -1
-                    for (j, b) in buttons.enumerated() { b.state = (j == storedIndex) ? .on : .off }
-                    UpgradeTab.navigateToUpgradeTab()
-                    return
-                }
+                let _ = buttons
                 let decision = applyOverrideClick(
                     baseName: baseName, index: index,
                     newIndex: i,
@@ -724,52 +637,17 @@ class ControlsTab {
         case "appearanceStyleOverride":
             syncRadioButtons(control, to: Preferences.appearanceStyle.index)
         case "appearanceSizeOverride":
-            if let segmented = control as? NSSegmentedControl {
-                segmented.selectedSegment = Preferences.appearanceSize.index
-                if let overlay = overrideProBadges[key] {
-                    AppearanceTab.refreshTrailingSegmentBadge(segmented, proIndex: AppearanceSizePreference.allCases.firstIndex(of: .auto)!, overlay: overlay)
-                }
-            }
+            (control as? NSSegmentedControl)?.selectedSegment = Preferences.appearanceSize.index
         case "appearanceThemeOverride":
             (control as? NSSegmentedControl)?.selectedSegment = Preferences.appearanceTheme.index
         case "shortcutStyleOverride":
-            if let segmented = control as? NSSegmentedControl {
-                segmented.selectedSegment = Preferences.shortcutStyle.index
-                if let overlay = overrideProBadges[key] {
-                    AppearanceTab.refreshTrailingSegmentBadge(segmented, proIndex: ShortcutStylePreference.allCases.firstIndex(of: .searchOnRelease)!, overlay: overlay)
-                }
-            }
+            (control as? NSSegmentedControl)?.selectedSegment = Preferences.shortcutStyle.index
         case "previewFocusedWindowOverride":
             (control as? Switch)?.setSilently(Preferences.previewSelectedWindow ? .on : .off)
         default: break
         }
     }
 
-    /// Resnap the 3 Pro-gated index-0 override controls to their currently-stored UserDefaults value.
-    /// Used after a Pro lock/unlock transition: `ProTransitionState.onProLockEngaged` writes
-    /// `appearanceStyleOverride` / etc. to the free equivalent, but the segmented/radio controls
-    /// still hold the user's pre-lock selection. Reading from UserDefaults catches them up.
-    private static func refreshGatedOverrideControlsFromStored() {
-        let styleKey = Preferences.indexToName("appearanceStyleOverride", 0)
-        if let style = overrideControls[styleKey] {
-            let stored = CachedUserDefaults.intFromMacroPref(styleKey, AppearanceStylePreference.allCases)
-            syncRadioButtons(style, to: stored)
-        }
-        let sizeKey = Preferences.indexToName("appearanceSizeOverride", 0)
-        if let size = overrideControls[sizeKey] as? NSSegmentedControl {
-            size.selectedSegment = CachedUserDefaults.intFromMacroPref(sizeKey, AppearanceSizePreference.allCases)
-            if let overlay = overrideProBadges[sizeKey] {
-                AppearanceTab.refreshTrailingSegmentBadge(size, proIndex: AppearanceSizePreference.allCases.firstIndex(of: .auto)!, overlay: overlay)
-            }
-        }
-        let shortcutStyleKey = Preferences.indexToName("shortcutStyleOverride", 0)
-        if let shortcutStyle = overrideControls[shortcutStyleKey] as? NSSegmentedControl {
-            shortcutStyle.selectedSegment = CachedUserDefaults.intFromMacroPref(shortcutStyleKey, ShortcutStylePreference.allCases)
-            if let overlay = overrideProBadges[shortcutStyleKey] {
-                AppearanceTab.refreshTrailingSegmentBadge(shortcutStyle, proIndex: ShortcutStylePreference.allCases.firstIndex(of: .searchOnRelease)!, overlay: overlay)
-            }
-        }
-    }
 
     /// Iterate every override control and resnap the ones whose key isn't overridden to the global.
     /// Called from `preferenceChanged` when a global appearance setting changes.
@@ -860,9 +738,6 @@ class ControlsTab {
             let row = SidebarListRow()
             row.setContent(shortcutTitle(index), shortcutSummary(index))
             row.setSelected(index == selectedShortcutIndex && selectedShortcutIndex != gestureSelectionIndex)
-            if index >= 1 {
-                row.setProBadge(true)
-            }
             row.onClick = { _, _ in
                 selectShortcut(index)
             }
@@ -923,10 +798,6 @@ class ControlsTab {
     private static func addShortcutSlot() {
         let currentCount = Preferences.shortcutCount
         guard currentCount < Preferences.maxShortcutCount else { return }
-        if currentCount >= 1 && LicenseManager.shared.isProLocked {
-            UpgradeTab.navigateToUpgradeTab()
-            return
-        }
         resetShortcutPreferences(currentCount)
         setAddedShortcutTriggerDefaults(currentCount)
         selectedShortcutIndex = currentCount
