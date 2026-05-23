@@ -2,7 +2,6 @@ import Cocoa
 import Darwin
 import ShortcutRecorder
 import AppCenterCrashes
-import Sparkle
 
 class App: AppCenterApplication {
     /// periphery:ignore
@@ -28,9 +27,6 @@ class App: AppCenterApplication {
     private static var pendingShowSettingsWindow = false
     // periphery:ignore
     private static var appCenterDelegate: AppCenterCrash?
-    // periphery:ignore
-    static var sparkleDelegate: SparkleDelegate?
-    static var updaterController: SPUStandardUpdaterController?
     // don't queue multiple delayed rebuildUi() calls
     private static var delayedDisplayScheduled = 0
     private static let refreshOpenUiThrottler = Throttler(delayInMs: 200)
@@ -95,10 +91,6 @@ class App: AppCenterApplication {
         focusSelectedWindow(selectedWindow)
     }
 
-    @objc static func checkForUpdatesNow(_ sender: NSMenuItem) {
-        GeneralTab.checkForUpdatesNow(sender)
-    }
-
     @objc static func checkPermissions(_ sender: NSMenuItem) {
         showPermissionsWindow()
     }
@@ -110,8 +102,6 @@ class App: AppCenterApplication {
     @objc static func showFeedbackPanel() {
         let wasFresh = FeedbackWindow.shared == nil
         initializeFeedbackWindowIfNeeded()
-        // Fresh init already runs reset(); skip the redundant second call so we don't
-        // double-fire the Sparkle preflight on the first ever open.
         if !wasFresh { FeedbackWindow.shared?.reset() }
         showSecondaryWindow(FeedbackWindow.shared!)
     }
@@ -365,14 +355,6 @@ class App: AppCenterApplication {
         CursorEvents.observe()
         TrackpadEvents.observe()
         CliEvents.observe()
-        App.sparkleDelegate = SparkleDelegate()
-        App.updaterController = SPUStandardUpdaterController(
-            startingUpdater: false,
-            updaterDelegate: App.sparkleDelegate!,
-            userDriverDelegate: nil)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 30) {
-            App.updaterController?.startUpdater()
-        }
         PreferencesEvents.initialize()
         BenchmarkRunner.startIfNeeded()
         showSettingsWindowOnFirstLaunchIfNeeded()
