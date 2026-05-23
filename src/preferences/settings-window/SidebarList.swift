@@ -90,7 +90,6 @@ class SidebarListRow: ClickHoverStackView {
     private let summaryLabel = DynamicColorTextField(labelWithString: "")
     private let chevronLabel = DynamicColorTextField(labelWithString: "›")
     private let textColumn = NSStackView()
-    private var proBadge: ProBadgeView?
     private var isSelectedRow = false
     private var isHoveredRow = false
     private var windowObservers = [NSObjectProtocol]()
@@ -222,24 +221,7 @@ class SidebarListRow: ClickHoverStackView {
         updateStyle()
     }
 
-    func setProBadge(_ show: Bool) {
-        proBadge?.removeFromSuperview()
-        proBadge = nil
-        if show {
-            let badge = ProBadgeView()
-            let wrapper = NSView()
-            wrapper.translatesAutoresizingMaskIntoConstraints = false
-            wrapper.addSubview(badge)
-            NSLayoutConstraint.activate([
-                badge.leadingAnchor.constraint(equalTo: wrapper.leadingAnchor),
-                badge.trailingAnchor.constraint(equalTo: wrapper.trailingAnchor),
-                badge.centerYAnchor.constraint(equalTo: wrapper.centerYAnchor, constant: 1),
-                wrapper.heightAnchor.constraint(equalTo: badge.heightAnchor),
-            ])
-            titleRow.addArrangedSubview(wrapper)
-            proBadge = badge
-        }
-    }
+    func setProBadge(_ show: Bool) { }
 
     private var isWindowKey: Bool { window?.isKeyWindow ?? false }
 
@@ -292,6 +274,5 @@ class SidebarListRow: ClickHoverStackView {
         titleLabel.needsDisplay = true
         summaryLabel.needsDisplay = true
         chevronLabel.needsDisplay = true
-        proBadge?.setSelected(isSelectedRow && isKey)
     }
 }

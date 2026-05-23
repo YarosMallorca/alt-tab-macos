@@ -82,13 +82,6 @@ class LabelAndControl: NSObject {
             buttonView.onClick = { [weak buttonView] control in
                 guard let buttonView else { return }
                 let siblings = (buttonView.superview as? NSStackView)?.arrangedSubviews.compactMap { $0 as? ImageTextButtonView } ?? []
-                if LicenseManager.shared.isProLocked && proGatedIndices.contains(index) {
-                    // Snap the radio group back to the stored value and bounce to the upgrade tab.
-                    let storedIndex = CachedUserDefaults.intFromMacroPref(rawName, macroPreferences)
-                    siblings.enumerated().forEach { (i, b) in b.state = (i == storedIndex) ? .on : .off }
-                    UpgradeTab.navigateToUpgradeTab()
-                    return
-                }
                 siblings.enumerated().forEach { (i, otherButtonView) in
                     if otherButtonView != buttonView {
                         otherButtonView.state = i == index ? .on : .off

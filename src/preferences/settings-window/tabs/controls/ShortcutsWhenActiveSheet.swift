@@ -22,12 +22,10 @@ class ShortcutsWhenActiveSheet: SheetWindow {
         _ = table.addRow(focusWindowShortcut)
         _ = table.addRow(previousWindowShortcut)
         _ = table.addRow(cancelShortcut)
-        let searchRow = table.addRow(leftText: NSLocalizedString("Search", comment: ""),
+        _ = table.addRow(leftText: NSLocalizedString("Search", comment: ""),
             rightViews: [LabelAndControl.makeLabelWithRecorder(NSLocalizedString("Search", comment: ""), "searchShortcut", Preferences.searchShortcut, labelPosition: .right)[0]])
-        addProBadgeToLeftLabel(searchRow)
-        let lockSearchRow = table.addRow(leftText: NSLocalizedString("Lock search", comment: ""),
+        _ = table.addRow(leftText: NSLocalizedString("Lock search", comment: ""),
             rightViews: [LabelAndControl.makeLabelWithRecorder(NSLocalizedString("Lock search", comment: ""), "lockSearchShortcut", Preferences.lockSearchShortcut, labelPosition: .right)[0]])
-        addProBadgeToLeftLabel(lockSearchRow)
         _ = table.addRow(closeWindowShortcut)
         _ = table.addRow(minDeminWindowShortcut)
         _ = table.addRow(toggleFullscreenWindowShortcut)
@@ -36,13 +34,4 @@ class ShortcutsWhenActiveSheet: SheetWindow {
         return table
     }
 
-    private func addProBadgeToLeftLabel(_ rowInfo: TableGroupView.RowInfo) {
-        guard let label = rowInfo.leftViews?.first as? NSTextField else { return }
-        let badge = ProBadgeView()
-        label.superview?.addSubview(badge)
-        NSLayoutConstraint.activate([
-            badge.leadingAnchor.constraint(equalTo: label.trailingAnchor, constant: 4),
-            badge.centerYAnchor.constraint(equalTo: label.centerYAnchor, constant: 1),
-        ])
-    }
 }
